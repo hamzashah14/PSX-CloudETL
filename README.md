@@ -37,22 +37,24 @@
 
 ## Services
 
-| Service | Port | Stack | Purpose |
-|---------|------|-------|---------|
-| **Extract** | `8000` | FastAPI, yfinance | Fetches OHLCV data and company metadata from Yahoo Finance |
-| **Transform** | `8001` | FastAPI, pandas, numpy | Applies 5-phase financial analysis (cleaning → metrics → technicals → sector → risk) |
-| **Load** | `8003` | FastAPI, SQLAlchemy, PostgreSQL | Persists enriched data into a Star Schema warehouse with SCD Type 2 |
-| **Visualization** | `8002` | Dash, Plotly, Bootstrap | Premium "Quantum Glass" analytics dashboard with three modular views |
-| **Scheduler** | `8004` | Flask, schedule | Orchestrates periodic ETL runs across all services |
-| **PostgreSQL** | `5432` | postgres:15-alpine | Persistent data warehouse backend |
+| Service           | Port   | Stack                           | Purpose                                                                              |
+| ----------------- | ------ | ------------------------------- | ------------------------------------------------------------------------------------ |
+| **Extract**       | `8000` | FastAPI, yfinance               | Fetches OHLCV data and company metadata from Yahoo Finance                           |
+| **Transform**     | `8001` | FastAPI, pandas, numpy          | Applies 5-phase financial analysis (cleaning → metrics → technicals → sector → risk) |
+| **Load**          | `8003` | FastAPI, SQLAlchemy, PostgreSQL | Persists enriched data into a Star Schema warehouse with SCD Type 2                  |
+| **Visualization** | `8002` | Dash, Plotly, Bootstrap         | Premium "Quantum Glass" analytics dashboard with three modular views                 |
+| **Scheduler**     | `8004` | Flask, schedule                 | Orchestrates periodic ETL runs across all services                                   |
+| **PostgreSQL**    | `5432` | postgres:15-alpine              | Persistent data warehouse backend                                                    |
 
 ## Quick Start
 
 ### Prerequisites
+
 - Docker & Docker Compose
 - Git
 
 ### 1. Clone & Configure
+
 ```bash
 git clone <repo-url>
 cd psx-etl
@@ -63,6 +65,7 @@ cp .env.example .env
 ```
 
 ### 2. Launch
+
 ```bash
 # Build and start all 6 services
 docker-compose up --build
@@ -72,14 +75,16 @@ docker-compose up --build -d
 ```
 
 ### 3. Access
-| URL | Description |
-|-----|-------------|
-| **http://localhost:8002** | 📊 Quantum Analytics Dashboard |
-| http://localhost:8000/docs | Extract Service API Docs |
-| http://localhost:8001/docs | Transform Service API Docs |
-| http://localhost:8003/docs | Load Service API Docs |
+
+| URL                        | Description                    |
+| -------------------------- | ------------------------------ |
+| **http://localhost:8002**  | 📊 Quantum Analytics Dashboard |
+| http://localhost:8000/docs | Extract Service API Docs       |
+| http://localhost:8001/docs | Transform Service API Docs     |
+| http://localhost:8003/docs | Load Service API Docs          |
 
 ### 4. Stop
+
 ```bash
 docker-compose down        # Stop services
 docker-compose down -v     # Stop + delete database volumes
@@ -154,15 +159,15 @@ psx-etl/
 
 ## Environment Variables
 
-| Variable | Default | Used By |
-|----------|---------|---------|
-| `POSTGRES_USER` | — | postgres-db, load-service |
-| `POSTGRES_PASSWORD` | — | postgres-db, load-service |
-| `POSTGRES_DB` | `psx_warehouse` | postgres-db, load-service |
-| `TRANSFORM_SERVICE_URL` | `http://transform-service:8001` | visualization-service |
-| `EXTRACT_SERVICE_URL` | `http://extract-service:8000` | visualization-service, scheduler |
-| `LOAD_SERVICE_URL` | `http://load-service:8003` | scheduler |
-| `VISUALIZATION_SERVICE_URL` | `http://visualization-service:8002` | scheduler |
+| Variable                    | Default                             | Used By                          |
+| --------------------------- | ----------------------------------- | -------------------------------- |
+| `POSTGRES_USER`             | —                                   | postgres-db, load-service        |
+| `POSTGRES_PASSWORD`         | —                                   | postgres-db, load-service        |
+| `POSTGRES_DB`               | `psx_warehouse`                     | postgres-db, load-service        |
+| `TRANSFORM_SERVICE_URL`     | `http://transform-service:8001`     | visualization-service            |
+| `EXTRACT_SERVICE_URL`       | `http://extract-service:8000`       | visualization-service, scheduler |
+| `LOAD_SERVICE_URL`          | `http://load-service:8003`          | scheduler                        |
+| `VISUALIZATION_SERVICE_URL` | `http://visualization-service:8002` | scheduler                        |
 
 ## API Quick Reference
 
@@ -194,14 +199,14 @@ curl http://localhost:8004/health
 
 ## Troubleshooting
 
-| Problem | Solution |
-|---------|----------|
-| Dashboard shows "DATA FEED UNAVAILABLE" | Ensure Transform Service is healthy: `curl http://localhost:8001/health` |
-| `visualization-service exited with code 1` | Check logs: `docker-compose logs -f visualization-service` |
-| Port conflicts | Edit `docker-compose.yml` port mappings |
-| PostgreSQL connection refused | Verify `.env` credentials and that `postgres-db` container is healthy |
-| Stale chart data | Click the **REFRESH** button on the dashboard or hit `http://localhost:8002/refresh` |
+| Problem                                    | Solution                                                                             |
+| ------------------------------------------ | ------------------------------------------------------------------------------------ |
+| Dashboard shows "DATA FEED UNAVAILABLE"    | Ensure Transform Service is healthy: `curl http://localhost:8001/health`             |
+| `visualization-service exited with code 1` | Check logs: `docker-compose logs -f visualization-service`                           |
+| Port conflicts                             | Edit `docker-compose.yml` port mappings                                              |
+| PostgreSQL connection refused              | Verify `.env` credentials and that `postgres-db` container is healthy                |
+| Stale chart data                           | Click the **REFRESH** button on the dashboard or hit `http://localhost:8002/refresh` |
 
 ## License
 
-This project is part of the CloudETL platform. For issues and feature requests, please refer to the project documentation.
+MIT License
