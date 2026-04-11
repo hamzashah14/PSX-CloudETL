@@ -146,8 +146,6 @@ venv.bak/
 # mkdocs documentation
 /site
 
-.gitignore
-.pre-commit-config.yaml
 # mypy
 .mypy_cache/
 .dmypy.json
