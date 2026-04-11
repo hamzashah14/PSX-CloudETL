@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: extract-deployment
+  labels:
+    app: extract
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: extract
+  template:
+    metadata:
+      labels:
+        app: extract
+    spec:
+      containers:
+      - name: extract
+        image: icr.io/etl-registry/psx-etl-extract:latest 
+        ports:
+        - containerPort: 8000
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+        securityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false # Keep false for now as app might write to temp logs or caches if not configured otherwise
+          runAsUser: 1000

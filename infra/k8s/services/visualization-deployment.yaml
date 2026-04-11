@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: visualization-deployment
+  labels:
+    app: visualization
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: visualization
+  template:
+    metadata:
+      labels:
+        app: visualization
+    spec:
+      containers:
+      - name: visualization
+        image: icr.io/etl-registry/psx-etl-visualization:latest
+        ports:
+        - containerPort: 8002
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8002
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8002
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi" # Viz can be memory intensive
+        securityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          runAsUser: 1000
+        env:
+        - name: TRANSFORM_SERVICE_URL
+          value: "http://transform-service:8001"

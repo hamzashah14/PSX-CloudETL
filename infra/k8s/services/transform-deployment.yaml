@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transform-deployment
+  labels:
+    app: transform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: transform
+  template:
+    metadata:
+      labels:
+        app: transform
+    spec:
+      containers:
+      - name: transform
+        image: icr.io/etl-registry/psx-etl-transform:latest 
+        ports:
+        - containerPort: 8001
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8001
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8001
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+          limits:
+            cpu: "1000m"
+            memory: "512Mi"
+        securityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          runAsUser: 1000

@@ -1,0 +1,7 @@
+pandas
+requests
+flask
+schedule
+psutil
+gunicorn
+flask-cors

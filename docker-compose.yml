@@ -1,0 +1,127 @@
+# version: '3.8' (obsolete)
+
+services:
+  extract-service:
+    build: ./services/extract
+    ports:
+      - "8000:8000"
+    networks:
+      - psx-etl-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  transform-service:
+    build: ./services/transform
+    ports:
+      - "8001:8001"
+    depends_on:
+      extract-service:
+        condition: service_healthy
+    networks:
+      - psx-etl-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  visualization-service:
+    build: ./services/visualization
+    ports:
+      - "8002:8002"
+    depends_on:
+      transform-service:
+        condition: service_healthy
+    environment:
+      - TRANSFORM_SERVICE_URL=http://transform-service:8001
+      - EXTRACT_SERVICE_URL=http://extract-service:8000
+    networks:
+      - psx-etl-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  scheduler-service:
+    build: ./services/scheduler
+    ports:
+      - "8004:8004"
+    depends_on:
+      extract-service:
+        condition: service_healthy
+      transform-service:
+        condition: service_healthy
+      visualization-service:
+        condition: service_healthy
+      load-service:
+        condition: service_healthy
+    environment:
+      - EXTRACT_SERVICE_URL=http://extract-service:8000
+      - TRANSFORM_SERVICE_URL=http://transform-service:8001
+      - VISUALIZATION_SERVICE_URL=http://visualization-service:8002
+      - LOAD_SERVICE_URL=http://load-service:8003
+    networks:
+      - psx-etl-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  postgres-db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-psx_warehouse}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - psx-etl-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB:-psx_warehouse}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  load-service:
+    build: ./services/load
+    ports:
+      - "8003:8003"
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      transform-service:
+        condition: service_healthy
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB:-psx_warehouse}
+      - POSTGRES_HOST=postgres-db
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-db:5432/${POSTGRES_DB:-psx_warehouse}
+    networks:
+      - psx-etl-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+networks:
+  psx-etl-network:
+    driver: bridge
+
+volumes:
+  postgres_data:

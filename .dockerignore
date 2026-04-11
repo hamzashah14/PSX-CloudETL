@@ -1,0 +1,31 @@
+# Python
+*.pyc
+__pycache__
+.venv
+.pytest_cache
+.coverage
+htmlcov
+
+# Environment & Secrets
+.env
+*.env
+.secrets*
+*.pem
+*.key
+
+# Version Control
+.git
+.gitignore
+.gitattributes
+
+# Development / Documentation
+*.md
+tests/
+Makefile
+Jenkinsfile
+docker-compose*
+.pre-commit-config.yaml
+
+# OS Artifacts
+.DS_Store
+Thumbs.db
