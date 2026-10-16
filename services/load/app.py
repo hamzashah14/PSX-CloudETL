@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, Column, Integer, String, Date, DateTime, Boolean, DECIMAL, BigInteger, Text
+from fastapi.responses import JSONResponse
+from sqlalchemy import create_engine, inspect, text, Column, Integer, String, Date, DateTime, Boolean, DECIMAL, BigInteger, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from pydantic import BaseModel
@@ -132,10 +133,9 @@ async def health_check():
     
     # Test 1: Database connectivity
     try:
-        db = SessionLocal()
-        # Simple query to test database connection
-        result = db.execute("SELECT 1").fetchone()
-        db.close()
+        # `with` closes the session even when the query fails
+        with SessionLocal() as db:
+            result = db.execute(text("SELECT 1")).fetchone()
         
         if result and result[0] == 1:
             checks["checks"]["database"] = "healthy"
@@ -147,17 +147,10 @@ async def health_check():
     
     # Test 2: Database table existence
     try:
-        db = SessionLocal()
-        # Check if main tables exist
+        # Check if main tables exist (the inspector works on PostgreSQL and SQLite alike)
         tables_to_check = ["fact_stock_prices", "dim_ticker", "dim_date", "dim_time"]
-        missing_tables = []
-        
-        for table in tables_to_check:
-            result = db.execute(f"SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = '{table}')").fetchone()
-            if not result or not result[0]:
-                missing_tables.append(table)
-        
-        db.close()
+        existing = inspect(engine)
+        missing_tables = [table for table in tables_to_check if not existing.has_table(table)]
         
         if len(missing_tables) == 0:
             checks["checks"]["database_schema"] = "healthy"
@@ -226,11 +219,9 @@ async def health_check():
     
     # Test 6: Basic data loading capability
     try:
-        # Test database session creation
-        db = SessionLocal()
-        # Test query execution
-        test_query = db.query(DimTicker).limit(1).first()
-        db.close()
+        # Test database session creation and query execution
+        with SessionLocal() as db:
+            db.query(DimTicker).limit(1).first()
         checks["checks"]["data_loading"] = "healthy"
         
     except Exception as e:
@@ -247,7 +238,10 @@ async def health_check():
     else:
         checks["status"] = "healthy"
     
-    return checks
+    # The pod is probed on this endpoint. Only Load's own dependency, the warehouse database, turns the
+    # HTTP status into 503: restarting or un-routing Load would not fix an outage of the Transform service.
+    database_down = any("unhealthy" in checks["checks"].get(name, "") for name in ("database", "database_schema"))
+    return JSONResponse(checks, status_code=503 if database_down else 200)
 
 @app.get("/")
 async def root():
