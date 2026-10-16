@@ -309,6 +309,11 @@ def manual_trigger():
 @app.route("/trigger/<service_name>")
 def manual_trigger_service(service_name):
     """Manually trigger a specific service"""
+    if service_name not in ("load", "visualization"):
+        return jsonify({
+            "error": f"Unknown service '{service_name}' (use load or visualization)",
+            "timestamp": datetime.datetime.utcnow().isoformat()
+        }), 404
     try:
         success = trigger_specific_service(service_name)
         if success:

@@ -16,13 +16,16 @@ def get_ticker_info(ticker):
 )
 def get_ticker_history(ticker, period):
     t = yf.Ticker(ticker)
-    return t.history(period=period).reset_index(), t.info
+    hist = t.history(period=period).reset_index()
+    # NaN is not valid JSON and would turn the response into a 500: send gaps in the data as null
+    return hist.astype(object).where(hist.notna(), None), t.info
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Dict, Any
 import asyncio
 
 import yfinance as yf
+import time
 import uuid
 
 app = FastAPI()

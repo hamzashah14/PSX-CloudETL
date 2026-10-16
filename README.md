@@ -132,14 +132,22 @@ The manifests are kustomize bases with an overlay per cloud (`infra/k8s/overlays
 
 ## Tests
 
-The tests run offline (in-memory SQLite and mocked HTTP), so they need no database and no network:
+The tests run offline (in-memory SQLite, mocked HTTP and yfinance), so they need no database and no network. A session fixture in `tests/conftest.py` makes any real socket use fail, so a test that reaches for the network fails instead of passing by accident.
 
 ```bash
-make install   # test dependencies are in the root requirements.txt
+make install   # test dependencies are in the root requirements.txt (pinned; the services target Python 3.9)
 make test      # same as: pytest tests/
 ```
 
-They cover the Transform and Load services: how Transform's indicator fields map onto the warehouse columns, the SCD Type 2 behaviour of `dim_ticker`, and a Transform-to-Load run end to end. The extract, scheduler and visualization test folders are still empty.
+| Folder | What it covers |
+|--------|----------------|
+| `tests/extract_tests` | `/extract`, `/history`, `/price`, `/extract_many` with yfinance mocked: UTC dates, selected company fields, unknown tickers, retries (fail twice then succeed, give up after three attempts, without the real waits), one bad ticker not spoiling a batch, gaps in Yahoo data sent as `null`, and the `/health` status |
+| `tests/transform_tests` | JSON-safe output, the `/health` status, and the calculations |
+| `tests/load_tests` | how Transform's indicator fields map onto the warehouse columns, SCD Type 2 on `dim_ticker`, a Transform-to-Load run end to end, and `/health`: a healthy database, an unreachable one (HTTP 503), missing tables (503), a Transform outage (still 200) and no leaked sessions |
+| `tests/scheduler_tests` | the update job (`POST /load/batch`, then `GET /refresh`, in that order), the completed / partial / error outcomes, one failing service not stopping the next call, the cap of ten recorded errors, `/health` aggregation, manual triggers, URLs from the environment, a single scheduler thread, and the scheduling loop (30 s job, startup job dropped after the first run, survival of an error with a 5 s back-off) |
+| `tests/visualization_tests` | the layout and callback wiring, the five-minute cache per ticker and period, a failed fetch not being cached, the refresh callback (period buttons, refresh button, all three views, no-data message), view switching, the chart and stats builders, and the `/health` and `/refresh` routes |
+
+The scheduler's background thread is stubbed at import and `time.sleep` is scripted, so nothing waits. Dash callbacks are called as plain functions with a hand-set callback context.
 
 ## Project Structure
 
