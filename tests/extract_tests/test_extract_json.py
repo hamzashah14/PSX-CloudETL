@@ -215,3 +215,20 @@ def test_price_failure_is_reported_not_raised(client, yahoo):
     yahoo.add("AAPL", history=prices(), fast_info={})  # no lastPrice
 
     assert client.get("/price/AAPL").json()["error"].startswith("Failed to fetch price for AAPL")
+
+
+# --- JSON safety ------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("path", ["/extract/AAPL", "/history/AAPL", "/extract_many?ticker=AAPL"])
+def test_missing_values_come_back_as_null_not_a_server_error(client, yahoo, path):
+    frame = prices(rows=2)
+    frame.loc[frame.index[0], "Open"] = float("nan")  # Yahoo leaves gaps for halted or partial sessions
+    yahoo.add("AAPL", history=frame)
+
+    response = client.get(path)
+
+    assert response.status_code == 200
+    rows = response.json()["data"]
+    rows = rows["AAPL"] if isinstance(rows, dict) else rows
+    assert rows[0]["Open"] is None
+    assert rows[1]["Open"] == 101.0
