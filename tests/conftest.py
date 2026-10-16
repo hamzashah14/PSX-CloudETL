@@ -53,6 +53,15 @@ def scheduler_app():
         return import_service("scheduler")
 
 
+@pytest.fixture()
+def import_scheduler():
+    """Import the scheduler again (to test configuration read at import time), still without its thread."""
+    def load():
+        with mock.patch("threading.Thread"):
+            return import_service("scheduler")
+    return load
+
+
 @pytest.fixture(scope="session")
 def visualization_app():
     return import_service("visualization")
