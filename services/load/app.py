@@ -5,6 +5,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from pydantic import BaseModel
 from datetime import datetime, date
+import math
 from typing import List, Optional
 import requests
 import pandas as pd
@@ -338,6 +339,34 @@ def get_or_create_time_key(db: Session, period: str, hour: int = 16, minute: int
     return new_key
 
 # Data Loading Functions
+def _num(record, *keys):
+    """First finite number found under any of keys, else None. 0.0 is a real value, not missing."""
+    for key in keys:
+        value = record.get(key)
+        if value is None:
+            continue
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(value):
+            return value
+    return None
+
+def fact_indicators(record):
+    """Map Transform's indicator fields onto fact_stock_prices columns.
+
+    Transform emits RSI_14 and Volatility_7 / Volatility_30. The older names (RSI, Volatility)
+    stay as fallbacks. The single `volatility` column holds the 7-day value.
+    """
+    return {
+        "ma_7": _num(record, "MA_7"),
+        "ma_30": _num(record, "MA_30"),
+        "rsi": _num(record, "RSI_14", "RSI"),
+        "daily_return": _num(record, "Daily_Return"),
+        "volatility": _num(record, "Volatility_7", "Volatility"),
+    }
+
 def load_stock_data_to_warehouse(db: Session, ticker: str, period: str):
     import time
     
@@ -409,11 +438,7 @@ def load_stock_data_to_warehouse(db: Session, ticker: str, period: str):
                     low_price=float(record.get('Low', 0)),
                     close_price=float(record.get('Close', 0)),
                     volume=int(record.get('Volume', 0)),
-                    ma_7=float(record.get('MA_7', 0)) if record.get('MA_7') else None,
-                    ma_30=float(record.get('MA_30', 0)) if record.get('MA_30') else None,
-                    rsi=float(record.get('RSI', 0)) if record.get('RSI') else None,
-                    daily_return=float(record.get('Daily_Return', 0)) if record.get('Daily_Return') else None,
-                    volatility=float(record.get('Volatility', 0)) if record.get('Volatility') else None
+                    **fact_indicators(record)
                 )
                 
                 new_facts.append(fact_record)
