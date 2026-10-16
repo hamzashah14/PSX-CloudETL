@@ -186,3 +186,32 @@ def test_extract_many_generates_a_batch_id_when_none_is_given(client, yahoo):
     batch_id = client.get("/extract_many?ticker=AAPL").json()["batch_id"]
 
     assert str(uuid.UUID(batch_id)) == batch_id
+
+
+# --- /price/{ticker} --------------------------------------------------------------------------
+
+def test_price_returns_last_price_change_and_percentage(client, yahoo):
+    yahoo.add("AAPL", history=prices(), fast_info={"lastPrice": 110.456, "previousClose": 100.0,
+                                                    "currency": "USD", "marketState": "REGULAR"})
+
+    body = client.get("/price/AAPL").json()
+
+    assert body["ticker"] == "AAPL"
+    assert (body["price"], body["change"], body["change_percent"]) == (110.46, 10.46, 10.46)
+    assert (body["currency"], body["market_state"]) == ("USD", "REGULAR")
+    assert len(body["timestamp"]) == 19  # YYYY-MM-DD HH:MM:SS
+
+
+def test_price_with_a_zero_previous_close_does_not_divide_by_zero(client, yahoo):
+    yahoo.add("IPO", history=prices(), fast_info={"lastPrice": 12.0, "previousClose": 0})
+
+    body = client.get("/price/IPO").json()
+
+    assert body["change_percent"] == 0
+    assert body["currency"] == "USD"  # default when Yahoo sends none
+
+
+def test_price_failure_is_reported_not_raised(client, yahoo):
+    yahoo.add("AAPL", history=prices(), fast_info={})  # no lastPrice
+
+    assert client.get("/price/AAPL").json()["error"].startswith("Failed to fetch price for AAPL")

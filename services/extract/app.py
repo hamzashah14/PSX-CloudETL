@@ -23,6 +23,7 @@ from typing import List, Dict, Any
 import asyncio
 
 import yfinance as yf
+import time
 import uuid
 
 app = FastAPI()
