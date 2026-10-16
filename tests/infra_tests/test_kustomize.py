@@ -57,6 +57,14 @@ def test_every_deployment_has_requests_and_probes(cloud):
         assert c["ports"][0]["containerPort"] == SERVICES[name.split("-")[0]], name
 
 
+def test_load_liveness_does_not_depend_on_the_database(cloud):
+    # Load's /health fails (503) when the database is down. As a readiness probe that stops traffic, as a
+    # liveness probe it would restart the pod in a loop without fixing anything.
+    c = of_kind(render(cloud, "services"), "Deployment")["load-deployment"]["spec"]["template"]["spec"]["containers"][0]
+    assert c["readinessProbe"]["httpGet"]["path"] == "/health"
+    assert "httpGet" not in c["livenessProbe"] and c["livenessProbe"]["tcpSocket"]["port"] == 8003
+
+
 def test_autoscaling_covers_the_stateless_services_only(cloud):
     docs = render(cloud, "services")
     deployments, hpas = of_kind(docs, "Deployment"), of_kind(docs, "HorizontalPodAutoscaler")

@@ -69,8 +69,8 @@ terraform destroy
 
 | Environment | Setup |
 |-------------|-------|
-| `azure-dev` | No protection rules. Used by pushes to the `dev` branch. |
-| `azure-prod` | Add **Required reviewers**: this is the approval gate. A push to `main` builds and scans the images, then waits here until a reviewer approves. Restrict deployment branches to `main` if you like. |
+| `azure-dev` | No protection rules. Used by manual runs that pick `dev`. |
+| `azure-prod` | Add **Required reviewers**: this is the approval gate. A manual run that picks `prod` (only allowed from `main`) builds and scans the images, then waits here until a reviewer approves. Restrict deployment branches to `main` if you like. |
 
 **Environment secrets** (add them to both environments; use different values for prod). They create the database secret in the cluster, which is no longer stored in Git:
 

@@ -1,8 +1,11 @@
 # Deploys the five services to Azure Kubernetes Service.
 #
-#   push to main  -> namespace prod, GitHub environment azure-prod (add required reviewers = approval gate)
-#   push to dev   -> namespace dev,  GitHub environment azure-dev
-#   run manually  -> pick dev or prod in the "environment" input
+# Manual only (Actions tab -> Deploy to Azure (AKS) -> Run workflow), so it never uses Actions minutes
+# on its own. Pick the environment:
+#   dev   -> namespace dev,  GitHub environment azure-dev   (run it from the dev or main branch)
+#   prod  -> namespace prod, GitHub environment azure-prod  (main branch only; add required reviewers
+#                                                             to azure-prod = approval gate)
+# To deploy on every push again, add `push: {branches: [main, dev]}` under `on:`.
 #
 # Stages: test -> build and push to ACR -> Trivy scan -> deploy -> smoke test, rolling back on failure.
 # Set up with infra/azure/terraform (see its README). Sign-in uses OIDC, no Azure secret is stored.
@@ -13,12 +16,6 @@
 name: Deploy to Azure (AKS)
 
 on:
-  push:
-    branches: [main, dev]
-    paths-ignore:
-      - "**.md"
-      - "infra/azure/**"
-      - ".github/workflows/ci.yml"
   workflow_dispatch:
     inputs:
       environment:
@@ -31,9 +28,9 @@ permissions:
   id-token: write
   contents: read
 
-# One deploy per environment at a time; a newer push waits instead of cancelling a deploy half way.
+# One deploy per environment at a time; a newer run waits instead of cancelling a deploy half way.
 concurrency:
-  group: azure-deploy-${{ inputs.environment || (github.ref_name == 'main' && 'prod' || 'dev') }}
+  group: azure-deploy-${{ inputs.environment }}
   cancel-in-progress: false
 
 jobs:
@@ -64,9 +61,10 @@ jobs:
             echo "::error::Missing repository variables:$missing (see infra/azure/terraform/README.md)"
             exit 1
           fi
-          deploy_env="${INPUT_ENV:-}"
-          if [ -z "$deploy_env" ]; then
-            if [ "$REF_NAME" = "main" ]; then deploy_env=prod; else deploy_env=dev; fi
+          deploy_env="$INPUT_ENV"
+          if [ "$deploy_env" = "prod" ] && [ "$REF_NAME" != "main" ]; then
+            echo "::error::Production deploys must run from the main branch (this run is on ${REF_NAME})"
+            exit 1
           fi
           {
             echo "deploy_env=${deploy_env}"
