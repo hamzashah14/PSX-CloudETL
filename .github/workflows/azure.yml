@@ -1,0 +1,262 @@
+# Deploys the five services to Azure Kubernetes Service.
+#
+#   push to main  -> namespace prod, GitHub environment azure-prod (add required reviewers = approval gate)
+#   push to dev   -> namespace dev,  GitHub environment azure-dev
+#   run manually  -> pick dev or prod in the "environment" input
+#
+# Stages: test -> build and push to ACR -> Trivy scan -> deploy -> smoke test, rolling back on failure.
+# Set up with infra/azure/terraform (see its README). Sign-in uses OIDC, no Azure secret is stored.
+#
+# Repository variables:  AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID,
+#                        AZURE_RESOURCE_GROUP, AKS_CLUSTER_NAME, ACR_NAME
+# Environment secrets (in azure-dev and azure-prod): POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
+name: Deploy to Azure (AKS)
+
+on:
+  push:
+    branches: [main, dev]
+    paths-ignore:
+      - "**.md"
+      - "infra/azure/**"
+      - ".github/workflows/ci.yml"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Where to deploy
+        type: choice
+        options: [dev, prod]
+        default: dev
+
+permissions:
+  id-token: write
+  contents: read
+
+# One deploy per environment at a time; a newer push waits instead of cancelling a deploy half way.
+concurrency:
+  group: azure-deploy-${{ inputs.environment || (github.ref_name == 'main' && 'prod' || 'dev') }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Decide target
+    runs-on: ubuntu-latest
+    outputs:
+      deploy_env: ${{ steps.vals.outputs.deploy_env }}
+      image_tag: ${{ steps.vals.outputs.image_tag }}
+      registry: ${{ steps.vals.outputs.registry }}
+    steps:
+      - id: vals
+        env:
+          INPUT_ENV: ${{ inputs.environment }}
+          REF_NAME: ${{ github.ref_name }}
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          AKS_CLUSTER_NAME: ${{ vars.AKS_CLUSTER_NAME }}
+          ACR_NAME: ${{ vars.ACR_NAME }}
+        run: |
+          missing=""
+          for name in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID AZURE_RESOURCE_GROUP AKS_CLUSTER_NAME ACR_NAME; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository variables:$missing (see infra/azure/terraform/README.md)"
+            exit 1
+          fi
+          deploy_env="${INPUT_ENV:-}"
+          if [ -z "$deploy_env" ]; then
+            if [ "$REF_NAME" = "main" ]; then deploy_env=prod; else deploy_env=dev; fi
+          fi
+          {
+            echo "deploy_env=${deploy_env}"
+            echo "image_tag=${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}"
+            echo "registry=${ACR_NAME}.azurecr.io"
+          } >> "$GITHUB_OUTPUT"
+
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - run: pip install -r requirements.txt
+      - run: python -m pytest tests -q
+
+  build:
+    name: Build and push ${{ matrix.service }}
+    needs: [plan, test]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        service: [extract, transform, load, scheduler, visualization]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Log in to the registry
+        env:
+          ACR_NAME: ${{ vars.ACR_NAME }}
+        run: az acr login --name "$ACR_NAME"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: services/${{ matrix.service }}
+          push: true
+          tags: |
+            ${{ needs.plan.outputs.registry }}/psx-etl-${{ matrix.service }}:${{ needs.plan.outputs.image_tag }}
+            ${{ needs.plan.outputs.registry }}/psx-etl-${{ matrix.service }}:${{ matrix.service }}-latest
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  scan:
+    name: Scan ${{ matrix.service }}
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        service: [extract, transform, load, scheduler, visualization]
+    steps:
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Get a registry token for Trivy
+        id: acr
+        env:
+          ACR_NAME: ${{ vars.ACR_NAME }}
+        run: |
+          token=$(az acr login --name "$ACR_NAME" --expose-token --output tsv --query accessToken)
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+      - uses: aquasecurity/trivy-action@v0.33.1
+        env:
+          TRIVY_USERNAME: 00000000-0000-0000-0000-000000000000
+          TRIVY_PASSWORD: ${{ steps.acr.outputs.token }}
+        with:
+          image-ref: ${{ needs.plan.outputs.registry }}/psx-etl-${{ matrix.service }}:${{ needs.plan.outputs.image_tag }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+
+  deploy:
+    name: Deploy to ${{ needs.plan.outputs.deploy_env }}
+    needs: [plan, build, scan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # azure-prod has required reviewers: the job waits here for approval.
+    environment: azure-${{ needs.plan.outputs.deploy_env }}
+    env:
+      NAMESPACE: ${{ needs.plan.outputs.deploy_env }}
+      REGISTRY: ${{ needs.plan.outputs.registry }}
+      IMAGE_TAG: ${{ needs.plan.outputs.image_tag }}
+      SERVICES: extract transform load scheduler visualization
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: azure/use-kubelogin@v1
+        with:
+          kubelogin-version: v0.1.4
+
+      - uses: azure/aks-set-context@v4
+        with:
+          resource-group: ${{ vars.AZURE_RESOURCE_GROUP }}
+          cluster-name: ${{ vars.AKS_CLUSTER_NAME }}
+          use-kubelogin: "true"
+
+      - uses: imranismail/setup-kustomize@v2
+        with:
+          kustomize-version: 5.4.3
+
+      - name: Create namespaces
+        run: |
+          for ns in database "$NAMESPACE"; do
+            kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f -
+          done
+
+      - name: Record the current revision of every deployment
+        run: |
+          : > "$RUNNER_TEMP/previous-revisions.txt"
+          for svc in $SERVICES; do
+            rev=$(kubectl get deployment "${svc}-deployment" -n "$NAMESPACE" \
+              -o jsonpath='{.metadata.annotations.deployment\.kubernetes\.io/revision}' 2>/dev/null || true)
+            if [ -n "$rev" ]; then echo "$svc $rev" >> "$RUNNER_TEMP/previous-revisions.txt"; fi
+          done
+          {
+            echo "### Revisions before this deploy (${NAMESPACE})"
+            echo '```'
+            cat "$RUNNER_TEMP/previous-revisions.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create the database secret
+        env:
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+        run: bash infra/scripts/create-db-secret.sh database "$NAMESPACE"
+
+      - name: Point the overlay at the new images
+        working-directory: infra/k8s/overlays/azure/services
+        run: |
+          for svc in $SERVICES; do
+            kustomize edit set image "psx-etl-${svc}=${REGISTRY}/psx-etl-${svc}:${IMAGE_TAG}"
+          done
+
+      - name: Apply
+        id: apply
+        run: |
+          kubectl apply -k infra/k8s/overlays/azure/database -n database
+          kubectl rollout status statefulset/postgres -n database --timeout=300s
+          kubectl apply -k infra/k8s/overlays/azure/services -n "$NAMESPACE"
+          kubectl apply -k infra/k8s/overlays/azure/ingress -n "$NAMESPACE"
+
+      - name: Wait for the rollout
+        run: |
+          for svc in $SERVICES; do
+            kubectl rollout status "deployment/${svc}-deployment" -n "$NAMESPACE" --timeout=300s
+          done
+
+      - name: Smoke test
+        run: |
+          for item in extract:8000:/health transform:8001:/health load:8003:/health scheduler:8004:/health visualization:8002:/; do
+            IFS=: read -r svc port path <<< "$item"
+            echo "Checking ${svc} on port ${port}${path}"
+            kubectl exec -n "$NAMESPACE" "deploy/${svc}-deployment" -- python -c \
+              "import sys, urllib.request as u; sys.exit(u.urlopen('http://localhost:${port}${path}', timeout=10).status != 200)"
+          done
+          echo "All services answered 200"
+
+      - name: Show pod status and roll back
+        if: failure() && steps.apply.conclusion != 'skipped'
+        run: |
+          kubectl get pods -n "$NAMESPACE" -o wide || true
+          for pod in $(kubectl get pods -n "$NAMESPACE" --no-headers --field-selector=status.phase!=Running -o custom-columns=:metadata.name); do
+            echo "---- $pod"
+            kubectl describe pod "$pod" -n "$NAMESPACE" | tail -40
+          done
+          if [ ! -s "$RUNNER_TEMP/previous-revisions.txt" ]; then
+            echo "No earlier revisions were recorded (first deploy), nothing to roll back to."
+            exit 0
+          fi
+          while read -r svc rev; do
+            echo "Rolling ${svc}-deployment back to revision ${rev}"
+            kubectl rollout undo "deployment/${svc}-deployment" -n "$NAMESPACE" --to-revision="$rev" || echo "rollback of ${svc} failed"
+          done < "$RUNNER_TEMP/previous-revisions.txt"

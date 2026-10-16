@@ -1,0 +1,93 @@
+# Checks that run on every pull request and push. Nothing here needs Azure credentials.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - run: pip install -r requirements.txt
+      - run: python -m pytest tests -q
+
+  manifests:
+    name: Kubernetes manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Look for the kustomize overlays
+        id: guard
+        run: |
+          if [ -d infra/k8s/overlays ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::infra/k8s/overlays does not exist on this branch, skipping manifest validation"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install kubeconform
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
+            | sudo tar -xz -C /usr/local/bin kubeconform
+      - name: Render and validate every overlay
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          failed=0
+          for cloud in ibm azure; do
+            for part in database services ingress; do
+              dir="infra/k8s/overlays/${cloud}/${part}"
+              if [ ! -d "$dir" ]; then
+                echo "::error::missing $dir"
+                failed=1
+                continue
+              fi
+              echo "== $dir"
+              kubectl kustomize "$dir" | kubeconform -strict -ignore-missing-schemas -kubernetes-version 1.30.0 -summary - || failed=1
+            done
+          done
+          exit "$failed"
+
+  terraform:
+    name: Terraform (infra/azure)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/azure/terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend=false -input=false
+      - run: terraform validate
+
+  images:
+    name: Build ${{ matrix.service }} image
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [extract, transform, load, scheduler, visualization]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: services/${{ matrix.service }}
+          push: false
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
