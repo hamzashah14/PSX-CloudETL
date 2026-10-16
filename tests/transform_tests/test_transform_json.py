@@ -5,7 +5,7 @@ Test script to verify the transform service handles JSON serialization correctly
 
 import sys
 import os
-sys.path.append(os.path.join(os.path.dirname(__file__), 'services', 'transform'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'services', 'transform'))
 
 import json
 import numpy as np
