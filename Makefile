@@ -3,17 +3,16 @@
 
 # Install dependencies
 install:
-    pip install -r requirements.txt
+	pip install -r requirements.txt
 
 # Run pre-commit hooks
 lint:
-    pre-commit run --all-files
+	pre-commit run --all-files
 
 # Run tests with pytest
 test:
-    pytest tests/
+	pytest tests/
 
-# Run the FastAPI server
+# Run the extract service on port 8000 with auto-reload
 run:
-    uvicorn services/extract.app:app --reload
-    
+	uvicorn app:app --reload --app-dir services/extract --port 8000

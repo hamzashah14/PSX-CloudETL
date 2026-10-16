@@ -5,6 +5,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from pydantic import BaseModel
 from datetime import datetime, date
+import math
 from typing import List, Optional
 import requests
 import pandas as pd
@@ -253,34 +254,55 @@ async def root():
     return {"message": "Stock Data Warehouse Load Service", "version": "1.0.0"}
 
 # SCD Type 2 Helper Functions
-def get_or_create_ticker_key(db: Session, ticker_symbol: str, company_name: str = None, sector: str = None, industry: str = None) -> int:
-    current_ticker = db.query(DimTicker).filter(
+TICKER_ATTRS = ("company_name", "sector", "industry", "market_cap")
+
+def get_or_create_ticker_key(db: Session, ticker_symbol: str, company_name: str = None, sector: str = None,
+                             industry: str = None, market_cap: int = None) -> int:
+    """Return the key of the symbol's current dim_ticker row (SCD Type 2).
+
+    No current row: insert version 1. Current row whose values differ from any attribute we
+    received: close it (end_date = today, is_current = False) and insert version + 1, carrying
+    over what we did not receive. None or "" means unknown, never "changed".
+    """
+    incoming = {k: v for k, v in zip(TICKER_ATTRS, (company_name, sector, industry, market_cap))
+                if v not in (None, "")}
+    today = date.today()
+    current = db.query(DimTicker).filter(
         DimTicker.ticker_symbol == ticker_symbol,
         DimTicker.is_current == True
     ).first()
-    
-    if current_ticker:
-        return current_ticker.ticker_key
-    
-    # Create new ticker record
+
+    if current and all(getattr(current, k) == v for k, v in incoming.items()):
+        return current.ticker_key
+
+    # ponytail: max+1 key is not safe for concurrent loaders; switch to a DB sequence if loads run in parallel
     max_key = db.query(DimTicker.ticker_key).order_by(DimTicker.ticker_key.desc()).first()
     new_key = (max_key[0] + 1) if max_key else 1
-    
-    new_ticker = DimTicker(
-        ticker_key=new_key,
-        ticker_symbol=ticker_symbol,
-        company_name=company_name or f"{ticker_symbol} Corporation",
-        sector=sector or "Technology",
-        industry=industry or "Software",
-        market_cap=1000000000,
-        effective_date=date.today(),
-        end_date=None,
-        is_current=True,
-        version=1
-    )
-    db.add(new_ticker)
-    db.commit()
+
+    attrs = {k: getattr(current, k) for k in TICKER_ATTRS} if current else dict.fromkeys(TICKER_ATTRS)
+    attrs.update(incoming)
+    try:
+        if current:
+            current.end_date = today
+            current.is_current = False
+        db.add(DimTicker(
+            ticker_key=new_key,
+            ticker_symbol=ticker_symbol,
+            effective_date=today,
+            end_date=None,
+            is_current=True,
+            version=((current.version or 1) + 1) if current else 1,
+            **attrs
+        ))
+        db.commit()  # closing the old row and inserting the new one is a single transaction
+    except Exception:
+        db.rollback()
+        raise
     return new_key
+
+def ticker_keys(db: Session, ticker_symbol: str) -> list:
+    """Keys of every dim_ticker version of a symbol. Facts stay on the version that was current when loaded."""
+    return [key for (key,) in db.query(DimTicker.ticker_key).filter(DimTicker.ticker_symbol == ticker_symbol).all()]
 
 def get_or_create_date_key(db: Session, target_date: date) -> int:
     date_record = db.query(DimDate).filter(DimDate.full_date == target_date).first()
@@ -338,6 +360,49 @@ def get_or_create_time_key(db: Session, period: str, hour: int = 16, minute: int
     return new_key
 
 # Data Loading Functions
+def _num(record, *keys):
+    """First finite number found under any of keys, else None. 0.0 is a real value, not missing."""
+    for key in keys:
+        value = record.get(key)
+        if value is None:
+            continue
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(value):
+            return value
+    return None
+
+def fact_indicators(record):
+    """Map Transform's indicator fields onto fact_stock_prices columns.
+
+    Transform emits RSI_14 and Volatility_7 / Volatility_30. The older names (RSI, Volatility)
+    stay as fallbacks. The single `volatility` column holds the 7-day value.
+    """
+    return {
+        "ma_7": _num(record, "MA_7"),
+        "ma_30": _num(record, "MA_30"),
+        "rsi": _num(record, "RSI_14", "RSI"),
+        "daily_return": _num(record, "Daily_Return"),
+        "volatility": _num(record, "Volatility_7", "Volatility"),
+    }
+
+def ticker_attributes(records):
+    """Latest non-empty sector, industry and market cap in a batch of Transform records.
+
+    Transform does not return a company name, so company_name stays unknown (NULL).
+    """
+    attrs = {}
+    for record in sorted(records, key=lambda r: str(r.get("Date", "")), reverse=True):
+        for column, field in (("sector", "sector"), ("industry", "industry"), ("market_cap", "marketCap")):
+            if column in attrs:
+                continue
+            value = _num(record, field) if column == "market_cap" else (record.get(field) or None)
+            if value not in (None, ""):
+                attrs[column] = int(value) if column == "market_cap" else value
+    return attrs
+
 def load_stock_data_to_warehouse(db: Session, ticker: str, period: str):
     import time
     
@@ -373,7 +438,7 @@ def load_stock_data_to_warehouse(db: Session, ticker: str, period: str):
         stock_data = data['data']
         
         # Get dimension keys
-        ticker_key = get_or_create_ticker_key(db, ticker)
+        ticker_key = get_or_create_ticker_key(db, ticker, **ticker_attributes(stock_data))
         time_key = get_or_create_time_key(db, period)
         
         # Pre-fetch all date keys to avoid N+1 queries
@@ -382,7 +447,7 @@ def load_stock_data_to_warehouse(db: Session, ticker: str, period: str):
         
         # Get all existing date_keys for this ticker/time combo
         existing_facts = db.query(FactStockPrices.date_key).filter(
-            FactStockPrices.ticker_key == ticker_key,
+            FactStockPrices.ticker_key.in_(ticker_keys(db, ticker)),
             FactStockPrices.time_key == time_key,
             FactStockPrices.date_key.in_(date_keys_map.values())
         ).all()
@@ -409,11 +474,7 @@ def load_stock_data_to_warehouse(db: Session, ticker: str, period: str):
                     low_price=float(record.get('Low', 0)),
                     close_price=float(record.get('Close', 0)),
                     volume=int(record.get('Volume', 0)),
-                    ma_7=float(record.get('MA_7', 0)) if record.get('MA_7') else None,
-                    ma_30=float(record.get('MA_30', 0)) if record.get('MA_30') else None,
-                    rsi=float(record.get('RSI', 0)) if record.get('RSI') else None,
-                    daily_return=float(record.get('Daily_Return', 0)) if record.get('Daily_Return') else None,
-                    volatility=float(record.get('Volatility', 0)) if record.get('Volatility') else None
+                    **fact_indicators(record)
                 )
                 
                 new_facts.append(fact_record)
@@ -470,7 +531,7 @@ async def get_ticker_data(ticker: str, limit: int = 100, db: Session = Depends(g
         raise HTTPException(status_code=404, detail="Ticker not found")
     
     facts = db.query(FactStockPrices).filter(
-        FactStockPrices.ticker_key == ticker_record.ticker_key
+        FactStockPrices.ticker_key.in_(ticker_keys(db, ticker.upper()))
     ).order_by(FactStockPrices.date_key.desc()).limit(limit).all()
     
     return {

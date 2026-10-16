@@ -117,11 +117,24 @@ The visualization service features a premium **Quantum Glass** design system wit
 
 The project includes a comprehensive **Jenkinsfile** for IBM Cloud Kubernetes deployment:
 
+- **Unit tests** (offline, same as `make test`) before any image is built
 - **Parallel container builds** for all 5 services
 - **Trivy security scanning** on production branches
 - **Manual approval gate** for production deployments
+- **Production smoke test**: every service must answer `/health` with 200 after the deploy
 - **Automatic rollback** on deployment failure
 - **Branch-based namespace targeting** (`dev`, `qa-test`, `master` → `prod`)
+
+## Tests
+
+The tests run offline (in-memory SQLite and mocked HTTP), so they need no database and no network:
+
+```bash
+make install   # test dependencies are in the root requirements.txt
+make test      # same as: pytest tests/
+```
+
+They cover the Transform and Load services: how Transform's indicator fields map onto the warehouse columns, the SCD Type 2 behaviour of `dim_ticker`, and a Transform-to-Load run end to end. The extract, scheduler and visualization test folders are still empty.
 
 ## Project Structure
 
