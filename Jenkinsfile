@@ -80,13 +80,15 @@ pipeline {
 
                     // Validate required files exist
                     def requiredPaths = [
-                        './psx-etl/services/extract/Dockerfile',
-                        './psx-etl/services/transform/Dockerfile',
-                        './psx-etl/services/load/Dockerfile',
-                        './psx-etl/services/scheduler/Dockerfile',
-                        './psx-etl/services/visualization/Dockerfile',
-                        './psx-etl/infra/k8s/services/',
-                        './psx-etl/infra/k8s/database/'
+                        './services/extract/Dockerfile',
+                        './services/transform/Dockerfile',
+                        './services/load/Dockerfile',
+                        './services/scheduler/Dockerfile',
+                        './services/visualization/Dockerfile',
+                        './infra/k8s/overlays/ibm/services/',
+                        './infra/k8s/overlays/ibm/database/',
+                        './infra/k8s/overlays/ibm/ingress/',
+                        './infra/scripts/create-db-secret.sh'
                     ]
 
                     requiredPaths.each { path ->
@@ -94,6 +96,13 @@ pipeline {
                             error "❌ Required path not found: ${path}"
                         }
                     }
+
+                    // The manifests must render before anything is built: a broken overlay should fail in seconds
+                    sh '''
+                        for part in database services ingress; do
+                            kubectl kustomize infra/k8s/overlays/ibm/$part > /dev/null
+                        done
+                    '''
 
                     echo "✅ All required files validated successfully"
                 }
@@ -108,12 +117,10 @@ pipeline {
                 script {
                     // The tests run offline (in-memory SQLite, mocked HTTP), so no database or network is needed.
                     docker.image('python:3.9-slim').inside('-e HOME=/tmp') {
-                        dir('psx-etl') {
-                            sh '''
-                                pip install --user --no-cache-dir -r requirements.txt
-                                python -m pytest tests -q
-                            '''
-                        }
+                        sh '''
+                            pip install --user --no-cache-dir -r requirements.txt
+                            python -m pytest tests -q
+                        '''
                     }
                 }
             }
@@ -173,7 +180,7 @@ pipeline {
                                     checkout scm
 
                                     def imageName = "${env.REGISTRY_URL}/psx-etl-${service}:${env.IMAGE_TAG}"
-                                    def serviceDir = "./psx-etl/services/${service}"
+                                    def serviceDir = "./services/${service}"
 
                                     // Verify Dockerfile exists
                                     if (!fileExists("${serviceDir}/Dockerfile")) {
@@ -322,6 +329,12 @@ pipeline {
                     try {
                         echo "🚀 Starting deployment to ${env.TARGET_NAMESPACE} namespace..."
 
+                        // Needs one Jenkins credential: `etl-postgres-credentials` (username and password for
+                        // the database). The database name is fixed below.
+                        withCredentials([usernamePassword(credentialsId: 'etl-postgres-credentials',
+                                                          usernameVariable: 'POSTGRES_USER',
+                                                          passwordVariable: 'POSTGRES_PASSWORD')]) {
+                        withEnv(['POSTGRES_DB=etldb']) {
                         sh '''
                             # Create backup of current deployment (production only)
                             if [ "${IS_PRODUCTION}" = "true" ]; then
@@ -329,13 +342,17 @@ pipeline {
                                 kubectl get deployments -n ${TARGET_NAMESPACE} -o yaml > deployment-backup-${BUILD_NUMBER}.yaml || echo "No existing deployments to backup"
                             fi
 
+                            # The database secret comes from Jenkins credentials, never from a file in Git
+                            echo "🔑 Creating the database secret..."
+                            infra/scripts/create-db-secret.sh database ${TARGET_NAMESPACE}
+
                             # Deploy database components (shared across environments)
                             echo "🗄️  Deploying database components..."
-                            kubectl apply --namespace=database -R -f psx-etl/infra/k8s/database/ --record
+                            kubectl apply -k infra/k8s/overlays/ibm/database -n database
 
-                            # Deploy application services
+                            # Deploy application services (Deployments, Services and autoscalers)
                             echo "📦 Deploying application services to ${TARGET_NAMESPACE}..."
-                            kubectl apply -n ${TARGET_NAMESPACE} -R -f psx-etl/infra/k8s/services/ --record
+                            kubectl apply -k infra/k8s/overlays/ibm/services -n ${TARGET_NAMESPACE}
 
                             # Apply specific built image tags securely using Kubernetes set image
                             echo "🔄 Rolling out pipeline with newly built images..."
@@ -345,9 +362,9 @@ pipeline {
                             kubectl set image deployment/visualization-deployment visualization=icr.io/etl-registry/psx-etl-visualization:${IMAGE_TAG} -n ${TARGET_NAMESPACE}
                             kubectl set image deployment/scheduler-deployment scheduler=icr.io/etl-registry/psx-etl-scheduler:${IMAGE_TAG} -n ${TARGET_NAMESPACE}
 
-                            # Deploy ingress configuration dynamically
+                            # Deploy ingress configuration
                             echo "🌐 Deploying ingress configuration..."
-                            sed "s|namespace: dev|namespace: ${TARGET_NAMESPACE}|g" psx-etl/infra/k8s/ingress.yaml | kubectl apply -n ${TARGET_NAMESPACE} -f -
+                            kubectl apply -k infra/k8s/overlays/ibm/ingress -n ${TARGET_NAMESPACE}
 
                             # Wait for deployments to be ready
                             echo "⏳ Waiting for deployments to be ready..."
@@ -355,8 +372,10 @@ pipeline {
 
                             # Display deployment status
                             echo "📊 Deployment status:"
-                            kubectl get pods,services,ingress -n ${TARGET_NAMESPACE}
+                            kubectl get pods,services,ingress,hpa -n ${TARGET_NAMESPACE}
                         '''
+                        }
+                        }
 
                         echo "✅ Deployment to ${env.TARGET_NAMESPACE} completed successfully!"
 
