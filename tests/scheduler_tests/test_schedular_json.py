@@ -326,3 +326,12 @@ def test_loop_survives_an_error_and_backs_off_five_seconds(scheduler_app, monkey
     sleep = run_loop(scheduler_app, monkeypatch, [None, KeyboardInterrupt])
 
     assert sleep.call_args_list == [mock.call(5), mock.call(1)]
+
+
+def test_trigger_of_an_unknown_service_is_a_client_error(client, http):
+    response = client.get("/trigger/nonsense")
+
+    assert response.status_code == 404
+    assert "nonsense" in response.get_json()["error"]
+    http.post.assert_not_called()
+    http.get.assert_not_called()
