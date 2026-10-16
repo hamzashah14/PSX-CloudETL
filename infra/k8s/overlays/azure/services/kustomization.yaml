@@ -1,0 +1,7 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Images come from Azure Container Registry. The registry name is not known here, so the GitHub
+# Actions workflow points each image at it before applying:
+#   kustomize edit set image psx-etl-extract=<acr>.azurecr.io/psx-etl-extract:<tag>
+resources:
+  - ../../../base/services

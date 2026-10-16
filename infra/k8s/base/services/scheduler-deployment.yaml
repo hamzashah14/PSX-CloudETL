@@ -5,7 +5,9 @@ metadata:
   labels:
     app: scheduler
 spec:
-  replicas: 1
+  replicas: 1  # must stay a single copy: it starts a pipeline run every 30 s
+  strategy:
+    type: Recreate  # never run the old and the new scheduler side by side during a rollout
   selector:
     matchLabels:
       app: scheduler
@@ -16,7 +18,7 @@ spec:
     spec:
       containers:
       - name: scheduler
-        image: icr.io/etl-registry/psx-etl-scheduler:latest 
+        image: psx-etl-scheduler:latest
         ports:
         - containerPort: 8004
         livenessProbe:

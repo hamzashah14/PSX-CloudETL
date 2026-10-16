@@ -1,34 +1,33 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: extract-deployment
+  name: visualization-deployment
   labels:
-    app: extract
+    app: visualization
 spec:
-  replicas: 1
   selector:
     matchLabels:
-      app: extract
+      app: visualization
   template:
     metadata:
       labels:
-        app: extract
+        app: visualization
     spec:
       containers:
-      - name: extract
-        image: icr.io/etl-registry/psx-etl-extract:latest 
+      - name: visualization
+        image: psx-etl-visualization:latest
         ports:
-        - containerPort: 8000
+        - containerPort: 8002
         livenessProbe:
           httpGet:
-            path: /health
-            port: 8000
+            path: /
+            port: 8002
           initialDelaySeconds: 15
           periodSeconds: 20
         readinessProbe:
           httpGet:
-            path: /health
-            port: 8000
+            path: /
+            port: 8002
           initialDelaySeconds: 5
           periodSeconds: 10
         resources:
@@ -37,9 +36,11 @@ spec:
             memory: "128Mi"
           limits:
             cpu: "500m"
-            memory: "256Mi"
+            memory: "512Mi" # Viz can be memory intensive
         securityContext:
           runAsNonRoot: true
           allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: false # Keep false for now as app might write to temp logs or caches if not configured otherwise
           runAsUser: 1000
+        env:
+        - name: TRANSFORM_SERVICE_URL
+          value: "http://transform-service:8001"
