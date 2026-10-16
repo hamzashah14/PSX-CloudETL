@@ -5,7 +5,6 @@ metadata:
   labels:
     app: transform
 spec:
-  replicas: 1
   selector:
     matchLabels:
       app: transform
@@ -16,7 +15,7 @@ spec:
     spec:
       containers:
       - name: transform
-        image: icr.io/etl-registry/psx-etl-transform:latest 
+        image: psx-etl-transform:latest
         ports:
         - containerPort: 8001
         livenessProbe:

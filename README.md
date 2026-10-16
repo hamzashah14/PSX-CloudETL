@@ -117,13 +117,18 @@ The visualization service features a premium **Quantum Glass** design system wit
 
 The project includes a comprehensive **Jenkinsfile** for IBM Cloud Kubernetes deployment:
 
+- **Manifest check**: the kustomize overlays must render before anything is built
 - **Unit tests** (offline, same as `make test`) before any image is built
 - **Parallel container builds** for all 5 services
 - **Trivy security scanning** on production branches
 - **Manual approval gate** for production deployments
+- **Secret from Jenkins credentials**: the database password is created in the cluster by `infra/scripts/create-db-secret.sh` and never lives in Git (Jenkins credential id `etl-postgres-credentials`)
+- **Autoscaling**: CPU-based HorizontalPodAutoscalers for the stateless services
 - **Production smoke test**: every service must answer `/health` with 200 after the deploy
 - **Automatic rollback** on deployment failure
 - **Branch-based namespace targeting** (`dev`, `qa-test`, `master` → `prod`)
+
+The manifests are kustomize bases with an overlay per cloud (`infra/k8s/overlays/ibm` and `azure`); see [infra/README.md](infra/README.md) for the layout, how to deploy by hand, and the decisions behind it.
 
 ## Tests
 
@@ -160,9 +165,13 @@ psx-etl/
 │   └── dashboard/              # Legacy placeholder (unused)
 │       ├── app.py, Dockerfile, requirements.txt
 ├── infra/
-│   ├── k8s/                    # Kubernetes manifests
-│   └── helm/                   # Helm charts
+│   ├── k8s/
+│   │   ├── base/               # services (+ autoscalers), database, ingress
+│   │   ├── overlays/           # ibm/ and azure/, each with database, services, ingress
+│   │   └── examples/           # reference-only manifests (never applied)
+│   └── scripts/                # create-db-secret.sh
 └── tests/
+    ├── infra_tests/            # kustomize overlays and the secret script
     ├── extract_tests/
     ├── transform_tests/
     ├── load_tests/

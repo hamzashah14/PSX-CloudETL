@@ -1,0 +1,22 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Images come from IBM Cloud Container Registry. The Jenkins pipeline pushes <service>-latest for
+# every build and then pins the exact build tag with `kubectl set image`.
+resources:
+  - ../../../base/services
+images:
+  - name: psx-etl-extract
+    newName: icr.io/etl-registry/psx-etl-extract
+    newTag: extract-latest
+  - name: psx-etl-transform
+    newName: icr.io/etl-registry/psx-etl-transform
+    newTag: transform-latest
+  - name: psx-etl-load
+    newName: icr.io/etl-registry/psx-etl-load
+    newTag: load-latest
+  - name: psx-etl-scheduler
+    newName: icr.io/etl-registry/psx-etl-scheduler
+    newTag: scheduler-latest
+  - name: psx-etl-visualization
+    newName: icr.io/etl-registry/psx-etl-visualization
+    newTag: visualization-latest

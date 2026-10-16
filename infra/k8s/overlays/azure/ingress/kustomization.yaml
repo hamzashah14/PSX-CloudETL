@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Uses the AKS application routing add-on (managed NGINX). With no host set the rules match any
+# name, so the dashboard is reachable on the ingress IP. To use a domain, add a host to each rule
+# and a tls section (see infra/README.md).
+resources:
+  - ../../../base/ingress
+patches:
+  - target:
+      kind: Ingress
+    patch: |-
+      - op: add
+        path: /spec/ingressClassName
+        value: webapprouting.kubernetes.azure.com

@@ -1,0 +1,23 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../../base/ingress
+patches:
+  - target:
+      kind: Ingress
+    patch: |-
+      - op: add
+        path: /spec/ingressClassName
+        value: public-iks-k8s-nginx
+      - op: add
+        path: /spec/rules/0/host
+        value: etl-cluster-671e80eceac83a1671e7575023369992-0000.us-south.containers.appdomain.cloud
+  - target:
+      kind: Ingress
+    patch: |-
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        name: all
+        annotations:
+          nginx.ingress.kubernetes.io/ssl-redirect: "true"

@@ -1,0 +1,129 @@
+# Ingress rules shared by every cloud. Add the host, ingress class and TLS settings in an overlay.
+# Dash dashboard: no path rewriting, and Dash's own asset and callback paths must reach it unchanged
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: visualization-ingress
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: visualization-service
+            port:
+              number: 8002
+      - path: /_dash-component-suites
+        pathType: Prefix
+        backend:
+          service:
+            name: visualization-service
+            port:
+              number: 8002
+      - path: /_dash-layout
+        pathType: Exact
+        backend:
+          service:
+            name: visualization-service
+            port:
+              number: 8002
+      - path: /_dash-dependencies
+        pathType: Exact
+        backend:
+          service:
+            name: visualization-service
+            port:
+              number: 8002
+      - path: /_dash-update-component
+        pathType: Prefix
+        backend:
+          service:
+            name: visualization-service
+            port:
+              number: 8002
+      - path: /_favicon.ico
+        pathType: Exact
+        backend:
+          service:
+            name: visualization-service
+            port:
+              number: 8002
+
+---
+# The APIs are reached under /<service>/ and the prefix is stripped before the request arrives
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: scheduler-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /scheduler(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: scheduler-service
+            port:
+              number: 8004
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: transform-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /transform(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: transform-service
+            port:
+              number: 8001
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: load-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /load(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: load-service
+            port:
+              number: 8003
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: extract-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /extract(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: extract-service
+            port:
+              number: 8000

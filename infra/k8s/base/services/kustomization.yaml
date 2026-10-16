@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# No namespace here: the pipelines apply this with `kubectl apply -k ... -n <dev|prod>`.
+# Images are named psx-etl-<service>; each overlay (or the CI pipeline) points them at a registry.
+resources:
+  - extract-deployment.yaml
+  - extract-service.yaml
+  - transform-deployment.yaml
+  - transform-service.yaml
+  - load-deployment.yaml
+  - load-service.yaml
+  - scheduler-deployment.yaml
+  - scheduler-service.yaml
+  - visualization-deployment.yaml
+  - visualization-service.yaml
+  - hpa.yaml

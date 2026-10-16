@@ -1,0 +1,7 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# The postgres-secret is NOT part of the manifests: infra/scripts/create-db-secret.sh creates it
+# from the pipeline's secret store, so a placeholder password is never applied over the real one.
+resources:
+  - postgres-statefulset.yaml
+  - postgres-service.yaml
