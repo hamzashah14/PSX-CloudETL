@@ -1,10 +1,12 @@
-# Checks that run on every pull request and push. Nothing here needs Azure credentials.
+# Tests, manifest validation, Terraform validation and image builds. Nothing here needs Azure
+# credentials. Manual only (Actions tab -> CI -> Run workflow), so it never uses Actions minutes on its
+# own. To run it on every pull request and push again, add under `on:`:
+#   pull_request:
+#   push: {branches: [main, dev]}
 name: CI
 
 on:
-  pull_request:
-  push:
-    branches: [main, dev]
+  workflow_dispatch:
 
 permissions:
   contents: read
