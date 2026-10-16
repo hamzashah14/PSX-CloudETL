@@ -18,9 +18,11 @@ spec:
         image: psx-etl-load:latest
         ports:
         - containerPort: 8003
+        # /health checks the database. That belongs in readiness (stop sending traffic while the database
+        # is down), not in liveness: restarting this pod cannot fix a database outage, it only adds
+        # restart loops. Liveness only asks whether the process still accepts connections.
         livenessProbe:
-          httpGet:
-            path: /health
+          tcpSocket:
             port: 8003
           initialDelaySeconds: 20 # Database might take a sec
           periodSeconds: 20
