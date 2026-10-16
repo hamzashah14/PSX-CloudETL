@@ -100,6 +100,25 @@ pipeline {
             }
         }
 
+        stage('Unit Tests') {
+            when {
+                expression { env.IS_DEPLOY_BRANCH == 'true' }
+            }
+            steps {
+                script {
+                    // The tests run offline (in-memory SQLite, mocked HTTP), so no database or network is needed.
+                    docker.image('python:3.9-slim').inside('-e HOME=/tmp') {
+                        dir('psx-etl') {
+                            sh '''
+                                pip install --user --no-cache-dir -r requirements.txt
+                                python -m pytest tests -q
+                            '''
+                        }
+                    }
+                }
+            }
+        }
+
         stage('IBM Cloud Authentication') {
             when {
                 expression { env.IS_DEPLOY_BRANCH == 'true' }
@@ -398,9 +417,16 @@ pipeline {
                     if (env.IS_PRODUCTION == 'true' && env.RUN_SMOKE_TESTS == 'true') {
                         echo "🧪 Running production smoke tests..."
                         sh '''
-                            # Add your smoke tests here
-                            echo "Smoke test placeholder - add your API health checks"
-                            # curl -f http://your-service/health || exit 1
+                            # Ask every service for /health from inside its own pod. The images are python:3.9-slim,
+                            # so python is always there (the scheduler image has no curl). A non-200 answer fails the build.
+                            for svc in extract:8000 transform:8001 load:8003 scheduler:8004 visualization:8002; do
+                                name=${svc%%:*}
+                                port=${svc##*:}
+                                echo "Checking ${name} on port ${port}..."
+                                kubectl exec -n ${TARGET_NAMESPACE} deploy/${name}-deployment -- python -c "import sys, urllib.request as u; sys.exit(u.urlopen('http://localhost:${port}/health', timeout=10).status != 200)" || { echo "❌ ${name} /health check failed"; exit 1; }
+                            done
+
+                            echo "✅ All services answered /health with 200"
                         '''
                     }
 
