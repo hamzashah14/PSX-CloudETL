@@ -318,3 +318,14 @@ def test_refresh_route_clears_the_data_cache(visualization_app, server, transfor
 
     assert response.get_json()["status"] == "success"
     assert visualization_app.get_cached_data.cache_info().currsize == 0
+
+
+@pytest.mark.parametrize("failure", [Reply(500), Reply(200, {"unexpected": "shape"}),
+                                     requests.exceptions.ConnectionError("transform is down")])
+def test_a_failed_fetch_is_not_remembered_for_five_minutes(visualization_app, transform, failure):
+    transform.post.side_effect = [failure, Reply(200, {"data": rows(5)})]
+
+    assert visualization_app.get_data_with_cache("AAPL", "1mo") == []
+    recovered = visualization_app.get_data_with_cache("AAPL", "1mo")  # same five-minute bucket
+
+    assert len(recovered) == 5

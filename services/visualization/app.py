@@ -551,26 +551,29 @@ colors = {
 
 @lru_cache(maxsize=128)
 def get_cached_data(ticker, period, timestamp):
-    """Fetch from transform API with caching"""
-    try:
-        transform_url = os.getenv('TRANSFORM_SERVICE_URL', 'http://transform-service:8001')
-        response = requests.post(
-            f'{transform_url}/transform_batch',
-            json={'tickers': ticker, 'period': period},
-            timeout=30
-        )
-        if response.status_code == 200:
-            return response.json()['data']
-        else:
-            return []
-    except Exception as e:
-        print(f"API Error: {e}")
-        return []
+    """Fetch from transform API with caching.
+
+    Raises on any failure: lru_cache never stores an exception, so a failed fetch is retried on the next
+    call instead of being remembered as "no data" for the rest of the five-minute window.
+    """
+    transform_url = os.getenv('TRANSFORM_SERVICE_URL', 'http://transform-service:8001')
+    response = requests.post(
+        f'{transform_url}/transform_batch',
+        json={'tickers': ticker, 'period': period},
+        timeout=30
+    )
+    if response.status_code != 200:
+        raise RuntimeError(f"transform service answered {response.status_code}")
+    return response.json()['data']
 
 def get_data_with_cache(ticker, period):
     """Get historical data with 5-minute caching"""
     cache_key = int(time.time() / 300)
-    return get_cached_data(ticker, period, cache_key)
+    try:
+        return get_cached_data(ticker, period, cache_key)
+    except Exception as e:
+        print(f"API Error: {e}")
+        return []
 
 # --- Enhanced Chart Components ---
 
