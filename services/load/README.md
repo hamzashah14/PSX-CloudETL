@@ -58,6 +58,10 @@ The `dim_ticker` dimension tracks changes to company metadata over time:
 
 When a company's sector, industry, or market cap changes, a new dimension record is inserted and the previous one is closed — preserving full audit history.
 
+How a change is detected: the incoming `sector`, `industry` and `market_cap` are compared with the current row. Empty values mean "unknown", never "changed". On a change the old row gets `end_date = today` and `is_current = False`, and the new row gets `version + 1`, in one transaction. Attributes that were not received are carried over.
+
+Facts stay attached to the version that was current when they were loaded, so the duplicate check and `GET /data/{ticker}` look at every version of the symbol. Transform does not return a company name, so `company_name` is `NULL` for now.
+
 ## API Endpoints
 
 | Method | Endpoint | Description |
@@ -146,6 +150,10 @@ Transform Service ──POST──→ Load Service
 3. Generates `dim_date` and `dim_time` entries if not present
 4. Creates surrogate keys for all dimension relationships
 5. Inserts fact records with composite key deduplication
+
+### Indicator columns
+
+`rsi` comes from `RSI_14` and `volatility` from `Volatility_7` (the 7-day value). `ma_7`, `ma_30` and `daily_return` come from the Transform fields of the same name. Missing or NaN values are stored as `NULL`; `0.0` is kept as a value.
 
 ## Running Locally
 
